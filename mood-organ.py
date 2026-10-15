@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Mood organ: dial a code, get a mood.
 
+The resting screen is splash-screen-heart.png, next to this script
+(black if that file is missing).
+
 Put mood files in ./moods (next to this script), named by their code:
   481.mp4            video with its own sound
   482.jpg + 482.mp3  image that stays up until the sound ends
   483.png            image on its own, stays up IMAGE_SECONDS
-  484.mp3            sound on its own, over a black screen
+  484.mp3            sound on its own, over the splash screen
 If a code has a video, the video wins.
 
 Keys: digits (top row or number pad), Enter to dial right away,
@@ -20,7 +23,9 @@ from pathlib import Path
 import mpv
 
 # ---- Settings ---------------------------------------------------------------
-MOODS_DIR = Path(__file__).resolve().parent / "moods"
+HERE = Path(__file__).resolve().parent
+MOODS_DIR = HERE / "moods"
+SPLASH = HERE / "splash-screen-heart.png"
 DIAL_AFTER = 2.0          # seconds after the last digit before the code goes through
 NO_SETTING_SECONDS = 5    # how long "No setting for ..." stays on screen
 IMAGE_SECONDS = 10        # how long an image without a sound stays up
@@ -32,6 +37,7 @@ SOUND = {".mp3", ".wav", ".ogg", ".m4a", ".flac"}
 screen = mpv.MPV(
     fullscreen=True, idle=True, force_window=True,
     input_default_bindings=False, input_vo_keyboard=True,
+    image_display_duration="inf",  # images stay up until the script changes them
     panscan=1.0,  # fill the screen, cropping anything that isn't the screen's shape
     osd_font_size=90, osd_align_x="center", osd_align_y="center",
     cursor_autohide="always",
@@ -43,6 +49,7 @@ digits = ""
 last_digit_at = 0.0
 image_waits_for_sound = False
 sound_started = False
+image_until = None
 running = True
 
 
@@ -55,6 +62,14 @@ def find(code, kinds):
 
 def say(text, seconds):
     screen.show_text(text, max(1, int(seconds * 1000)))
+
+
+def show_splash():
+    """The resting screen: the splash image, or black if the file is missing."""
+    if SPLASH.exists():
+        screen.play(str(SPLASH))
+    else:
+        screen.stop()
 
 
 def dial_digit(d):
@@ -81,29 +96,34 @@ def dial_now():
 
 def go():
     """Play whatever the dialed code points to. Call with the lock held."""
-    global digits, image_waits_for_sound, sound_started
+    global digits, image_waits_for_sound, sound_started, image_until
     code, digits = digits, ""
     speaker.stop()
     image_waits_for_sound = sound_started = False
+    image_until = None
 
     video, image, sound = find(code, VIDEO), find(code, IMAGE), find(code, SOUND)
     if not (video or image or sound):
-        screen.stop()
+        show_splash()
         say(f"No setting for {code}", NO_SETTING_SECONDS)
         return
 
     say("", 0)
     if video:
         screen.play(video)
+        if SPLASH.exists():
+            screen.playlist_append(str(SPLASH))  # back to the splash when the video ends
         return
     if image:
-        screen["image-display-duration"] = "inf" if sound else str(IMAGE_SECONDS)
         screen.play(image)
+        if sound:
+            image_waits_for_sound = True
+        else:
+            image_until = time.monotonic() + IMAGE_SECONDS
     else:
-        screen.stop()
+        show_splash()
     if sound:
         speaker.play(sound)
-        image_waits_for_sound = bool(image)
 
 
 def quit_organ():
@@ -112,7 +132,7 @@ def quit_organ():
 
 
 def main():
-    global image_waits_for_sound, sound_started
+    global image_waits_for_sound, sound_started, image_until
     for d in "0123456789":
         screen.on_key_press(d)(lambda d=d: dial_digit(d))
         screen.on_key_press("KP" + d)(lambda d=d: dial_digit(d))
@@ -123,18 +143,23 @@ def main():
 
     # Later: the rotary dial or knob gets wired up here and calls dial_digit(...).
 
+    show_splash()
     try:
         while running:
             time.sleep(0.05)
             with lock:
-                if digits and time.monotonic() - last_digit_at >= DIAL_AFTER:
+                now = time.monotonic()
+                if digits and now - last_digit_at >= DIAL_AFTER:
                     go()
+                if image_until and now >= image_until:  # image-only mood is done
+                    image_until = None
+                    show_splash()
                 if image_waits_for_sound:
                     if not speaker.idle_active:
                         sound_started = True
                     elif sound_started:  # the sound just ended, so take the image down
                         image_waits_for_sound = False
-                        screen.stop()
+                        show_splash()
     except (KeyboardInterrupt, mpv.ShutdownError):
         pass
     finally:
