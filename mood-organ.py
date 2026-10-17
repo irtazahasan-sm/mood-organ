@@ -4,18 +4,20 @@
 The resting screen is splash-screen-heart.png, next to this script
 (black if that file is missing).
 
-Put mood files in ./moods (next to this script), named by their code:
-  481.mp4            video with its own sound
-  482.jpg + 482.mp3  image that stays up until the sound ends
-  483.png            image on its own, stays up IMAGE_SECONDS
-  484.mp3            sound on its own, over the splash screen
-If a code has a video, the video wins.
+Put one folder per code in ./moods (next to this script), e.g. moods/481/:
+  a video alone        plays with its own sound
+  images (+ a sound)   shown in filename order, IMAGE_SECONDS each;
+                       an animated gif runs for as long as its animation
+  a video + sound/images  the video is muted and shown like an animated gif
+  a sound only         plays over the splash screen
+With LOOP_SESSION on, the mood repeats until another code is dialed.
 
 Keys: digits (top row or number pad), Enter to dial right away,
-Backspace to fix a digit, q to quit.
+Backspace to fix a digit, Escape to stop and return to the splash, q to quit.
 
 Run: python3 organ.py
 """
+import math
 import threading
 import time
 from pathlib import Path
@@ -28,17 +30,21 @@ MOODS_DIR = HERE / "moods"
 SPLASH = HERE / "splash-screen-heart.png"
 DIAL_AFTER = 2.0          # seconds after the last digit before the code goes through
 NO_SETTING_SECONDS = 5    # how long "No setting for ..." stays on screen
-IMAGE_SECONDS = 10        # how long an image without a sound stays up
+IMAGE_SECONDS = 2.0       # how long each still image stays up
+LOOP_SESSION = True       # repeat the dialed mood until another code is dialed
+# "fill": cover the whole screen, cropping the overflow; "fit": show it all, with black bars
+SCALE_MODE = ["fill", "fit"][1]
 VIDEO = {".mp4", ".mov", ".mkv", ".webm"}
-IMAGE = {".jpg", ".jpeg", ".png", ".webp"}
+IMAGE = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 SOUND = {".mp3", ".wav", ".ogg", ".m4a", ".flac"}
 # -----------------------------------------------------------------------------
 
 screen = mpv.MPV(
     fullscreen=True, idle=True, force_window=True,
+    background="none", background_color="#00000000",  # transparent pixels show the desktop (needs a compositor)
     input_default_bindings=False, input_vo_keyboard=True,
     image_display_duration="inf",  # images stay up until the script changes them
-    panscan=1.0,  # fill the screen, cropping anything that isn't the screen's shape
+    panscan=1.0 if SCALE_MODE == "fill" else 0.0,
     osd_font_size=90, osd_align_x="center", osd_align_y="center",
     cursor_autohide="always",
 )
@@ -47,25 +53,48 @@ speaker = mpv.MPV(vid="no", idle=True)  # sound for image moods; never opens a w
 lock = threading.Lock()
 digits = ""
 last_digit_at = 0.0
-image_waits_for_sound = False
-sound_started = False
-image_until = None
 running = True
 
+# The mood currently playing; None when resting on the splash screen.
+session = None
 
-def find(code, kinds):
-    for path in sorted(MOODS_DIR.glob(f"{code}.*")):
-        if path.suffix.lower() in kinds:
-            return str(path)
-    return None
+
+def find_all(folder, kinds):
+    return [str(p) for p in sorted(folder.iterdir()) if p.suffix.lower() in kinds]
+
+
+def show_image(path):
+    """Show one image of the slideshow and note when to move on."""
+    now = time.monotonic()
+    suffix = Path(path).suffix.lower()
+    session["gif"] = suffix == ".gif" or suffix in VIDEO  # animated: loops, timed by its length
+    session["started"] = now
+    session["next_at"] = float("inf") if session["gif"] else now + IMAGE_SECONDS
+    session["timed"] = not session["gif"]
+    screen.mute = "yes" if suffix in VIDEO else "no"  # the separate sound file takes over
+    screen.loop_file = "inf" if session["gif"] else "no"  # looping avoids a black gap
+    screen.play(path)
 
 
 def say(text, seconds):
     screen.show_text(text, max(1, int(seconds * 1000)))
 
 
+def show_menu(visible):
+    """List the dialable codes along the bottom of the splash screen."""
+    codes = [p.name for p in sorted(MOODS_DIR.iterdir()) if p.is_dir()] if visible else []
+    if codes:
+        text = "{\\an2\\fs40}Dial:  " + "   ".join(codes)
+        screen.command("osd-overlay", 1, "ass-events", text)
+    else:
+        screen.command("osd-overlay", 1, "none", "")
+
+
 def show_splash():
     """The resting screen: the splash image, or black if the file is missing."""
+    show_menu(True)
+    screen.loop_file = "no"
+    screen.mute = "no"
     if SPLASH.exists():
         screen.play(str(SPLASH))
     else:
@@ -96,34 +125,95 @@ def dial_now():
 
 def go():
     """Play whatever the dialed code points to. Call with the lock held."""
-    global digits, image_waits_for_sound, sound_started, image_until
+    global digits, session
     code, digits = digits, ""
     speaker.stop()
-    image_waits_for_sound = sound_started = False
-    image_until = None
+    session = None
 
-    video, image, sound = find(code, VIDEO), find(code, IMAGE), find(code, SOUND)
-    if not (video or image or sound):
+    folder = MOODS_DIR / code
+    videos = images = sounds = []
+    if folder.is_dir():
+        videos = find_all(folder, VIDEO)
+        images = find_all(folder, IMAGE)
+        sounds = find_all(folder, SOUND)
+    if not (videos or images or sounds):
         show_splash()
         say(f"No setting for {code}", NO_SETTING_SECONDS)
         return
 
     say("", 0)
-    if video:
-        screen.play(video)
-        if SPLASH.exists():
+    show_menu(False)
+    if videos and not (images or sounds):
+        screen.mute = "no"
+        screen.loop_file = "inf" if LOOP_SESSION else "no"
+        screen.play(videos[0])
+        if SPLASH.exists() and not LOOP_SESSION:
             screen.playlist_append(str(SPLASH))  # back to the splash when the video ends
         return
-    if image:
-        screen.play(image)
-        if sound:
-            image_waits_for_sound = True
-        else:
-            image_until = time.monotonic() + IMAGE_SECONDS
+
+    # A video next to sound or images is just another (muted) visual in the slideshow.
+    images = sorted(videos + images)
+    session = {"images": images, "idx": 0, "sound": bool(sounds),
+               "sound_started": False, "images_done": not images}
+    if images:
+        show_image(images[0])
     else:
         show_splash()
-    if sound:
-        speaker.play(sound)
+    if sounds:
+        speaker.loop_file = "inf" if LOOP_SESSION else "no"
+        speaker.play(sounds[0])
+
+
+def tick(now):
+    """Advance the slideshow and end the mood when it is over. Lock held."""
+    global session
+    s = session
+    if s is None:
+        return
+    images = s["images"]
+    if images and not s["images_done"]:
+        if s["gif"] and not s["timed"]:
+            # Once mpv reports the animation length, run whole loops covering IMAGE_SECONDS.
+            length = screen.duration
+            if length:
+                s["next_at"] = now + max(1, math.ceil(IMAGE_SECONDS / length)) * length
+                s["timed"] = True
+            elif now - s["started"] > 2:
+                s["next_at"] = s["started"] + IMAGE_SECONDS
+                s["timed"] = True
+        finished = now >= s["next_at"]
+        single_still = len(images) == 1
+        if finished and single_still and LOOP_SESSION:
+            s["next_at"] = float("inf")  # nothing to cycle to
+        elif finished:
+            s["idx"] += 1
+            if s["idx"] >= len(images):
+                if LOOP_SESSION:
+                    s["idx"] = 0
+                else:
+                    s["images_done"] = True
+            if not s["images_done"]:
+                show_image(images[s["idx"]])
+
+    sound_done = True
+    if s["sound"]:
+        if not speaker.idle_active:
+            s["sound_started"] = True
+        sound_done = s["sound_started"] and speaker.idle_active
+    if not LOOP_SESSION and s["images_done"] and sound_done:
+        session = None
+        show_splash()
+
+
+def escape():
+    """Stop whatever is playing and go back to the splash screen."""
+    global digits, session
+    with lock:
+        digits = ""
+        session = None
+        speaker.stop()
+        say("", 0)
+        show_splash()
 
 
 def quit_organ():
@@ -132,13 +222,13 @@ def quit_organ():
 
 
 def main():
-    global image_waits_for_sound, sound_started, image_until
     for d in "0123456789":
         screen.on_key_press(d)(lambda d=d: dial_digit(d))
         screen.on_key_press("KP" + d)(lambda d=d: dial_digit(d))
     screen.on_key_press("ENTER")(dial_now)
     screen.on_key_press("KP_ENTER")(dial_now)
     screen.on_key_press("BS")(delete_digit)
+    screen.on_key_press("ESC")(escape)
     screen.on_key_press("q")(quit_organ)
 
     # Later: the rotary dial or knob gets wired up here and calls dial_digit(...).
@@ -151,15 +241,7 @@ def main():
                 now = time.monotonic()
                 if digits and now - last_digit_at >= DIAL_AFTER:
                     go()
-                if image_until and now >= image_until:  # image-only mood is done
-                    image_until = None
-                    show_splash()
-                if image_waits_for_sound:
-                    if not speaker.idle_active:
-                        sound_started = True
-                    elif sound_started:  # the sound just ended, so take the image down
-                        image_waits_for_sound = False
-                        show_splash()
+                tick(now)
     except (KeyboardInterrupt, mpv.ShutdownError):
         pass
     finally:
