@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mood organ: dial a code, get a mood.
 
-The resting screen is splash-screen-heart.png, next to this script
+The resting screen is splash-screen-collage.png, next to this script
 (black if that file is missing).
 
 Put one folder per code in ./moods (next to this script), e.g. moods/481/:
@@ -27,7 +27,7 @@ import mpv
 # ---- Settings ---------------------------------------------------------------
 HERE = Path(__file__).resolve().parent
 MOODS_DIR = HERE / "moods"
-SPLASH = HERE / "splash-screen-heart.png"
+SPLASH = HERE / "splash-screen-collage.png"
 DIAL_AFTER = 2.0          # seconds after the last digit before the code goes through
 NO_SETTING_SECONDS = 5    # how long "No setting for ..." stays on screen
 IMAGE_SECONDS = 2.0       # how long each still image stays up
