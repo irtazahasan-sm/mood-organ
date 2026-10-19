@@ -43,8 +43,8 @@ SOUND = {".mp3", ".wav", ".ogg", ".m4a", ".flac"}
 
 screen = mpv.MPV(
     fullscreen=True, idle=True, force_window=True,
-    background="none" if BACKGROUND == "transparent" else "color",
-    background_color="#00000000" if BACKGROUND == "transparent" else "#000000",
+    # mpv's own default is opaque black; the option names differ between mpv versions, so leave them out.
+    **({"background": "none", "background_color": "#00000000"} if BACKGROUND == "transparent" else {}),
     input_default_bindings=False, input_vo_keyboard=True,
     image_display_duration="inf",  # images stay up until the script changes them
     panscan=1.0 if SCALE_MODE == "fill" else 0.0,
