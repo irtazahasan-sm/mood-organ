@@ -41,16 +41,31 @@ IMAGE = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 SOUND = {".mp3", ".wav", ".ogg", ".m4a", ".flac"}
 # -----------------------------------------------------------------------------
 
-screen = mpv.MPV(
-    fullscreen=True, idle=True, force_window=True,
-    # mpv's own default is opaque black; the option names differ between mpv versions, so leave them out.
-    **({"background": "none", "background_color": "#00000000"} if BACKGROUND == "transparent" else {}),
-    input_default_bindings=False, input_vo_keyboard=True,
-    image_display_duration="inf",  # images stay up until the script changes them
-    panscan=1.0 if SCALE_MODE == "fill" else 0.0,
-    osd_font_size=90, osd_align_x="center", osd_align_y="center",
-    cursor_autohide="always",
-)
+def make_screen():
+    # Older mpv: alpha + background colour. Newer mpv dropped alpha; background is a mode there.
+    if BACKGROUND == "transparent":
+        variants = [{"alpha": "yes", "background": "#00000000"},
+                    {"background": "none", "background_color": "#00000000"}]
+    else:
+        variants = [{"alpha": "blend", "background": "#000000"},
+                    {"background": "color", "background_color": "#000000"}]
+    for background in variants:
+        try:
+            return mpv.MPV(
+                fullscreen=True, idle=True, force_window=True,
+                input_default_bindings=False, input_vo_keyboard=True,
+                image_display_duration="inf",  # images stay up until the script changes them
+                panscan=1.0 if SCALE_MODE == "fill" else 0.0,
+                osd_font_size=90, osd_align_x="center", osd_align_y="center",
+                cursor_autohide="always",
+                **background,
+            )
+        except (AttributeError, ValueError):  # this mpv doesn't know these options
+            if background is variants[-1]:
+                raise
+
+
+screen = make_screen()
 speaker = mpv.MPV(vid="no", idle=True)  # sound for image moods; never opens a window
 
 lock = threading.Lock()
