@@ -27,7 +27,7 @@ import mpv
 # ---- Settings ---------------------------------------------------------------
 HERE = Path(__file__).resolve().parent
 MOODS_DIR = HERE / "moods"
-SPLASH = HERE / "splash-screen-heart.png"
+SPLASH = HERE / "splash-screen-collage.png"
 DIAL_AFTER = 2.0          # seconds after the last digit before the code goes through
 NO_SETTING_SECONDS = 5    # how long "No setting for ..." stays on screen
 IMAGE_SECONDS = 2.0       # how long each still image stays up
@@ -36,37 +36,21 @@ LOOP_SESSION = True       # repeat the dialed mood until another code is dialed
 SCALE_MODE = ["fill", "fit"][1]
 # "black": opaque black behind everything; "transparent": see the desktop through transparent pixels (needs a compositor)
 BACKGROUND = ["black", "transparent"][0]
-SHOW_MENU = True          # list the dialable codes on the splash screen
 VIDEO = {".mp4", ".mov", ".mkv", ".webm"}
 IMAGE = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 SOUND = {".mp3", ".wav", ".ogg", ".m4a", ".flac"}
 # -----------------------------------------------------------------------------
 
-def make_screen():
-    # Older mpv: alpha + background colour. Newer mpv dropped alpha; background is a mode there.
-    if BACKGROUND == "transparent":
-        variants = [{"alpha": "yes", "background": "#00000000"},
-                    {"background": "none", "background_color": "#00000000"}]
-    else:
-        variants = [{"alpha": "blend", "background": "#000000"},
-                    {"background": "color", "background_color": "#000000"}]
-    for background in variants:
-        try:
-            return mpv.MPV(
-                fullscreen=True, idle=True, force_window=True,
-                input_default_bindings=False, input_vo_keyboard=True,
-                image_display_duration="inf",  # images stay up until the script changes them
-                panscan=1.0 if SCALE_MODE == "fill" else 0.0,
-                osd_font_size=90, osd_align_x="center", osd_align_y="center",
-                cursor_autohide="always",
-                **background,
-            )
-        except (AttributeError, ValueError):  # this mpv doesn't know these options
-            if background is variants[-1]:
-                raise
-
-
-screen = make_screen()
+screen = mpv.MPV(
+    fullscreen=True, idle=True, force_window=True,
+    background="none" if BACKGROUND == "transparent" else "color",
+    background_color="#00000000" if BACKGROUND == "transparent" else "#000000",
+    input_default_bindings=False, input_vo_keyboard=True,
+    image_display_duration="inf",  # images stay up until the script changes them
+    panscan=1.0 if SCALE_MODE == "fill" else 0.0,
+    osd_font_size=90, osd_align_x="center", osd_align_y="center",
+    cursor_autohide="always",
+)
 speaker = mpv.MPV(vid="no", idle=True)  # sound for image moods; never opens a window
 
 lock = threading.Lock()
@@ -101,10 +85,10 @@ def say(text, seconds):
 
 def show_menu(visible):
     """List the dialable codes along the bottom of the splash screen."""
-    codes = [p.name for p in sorted(MOODS_DIR.iterdir()) if p.is_dir()] if visible and SHOW_MENU else []
+    codes = [p.name for p in sorted(MOODS_DIR.iterdir()) if p.is_dir()] if visible else []
     if codes:
         text = "{\\an2\\fs40}Dial:  " + "   ".join(codes)
-        screen.command("osd-overlay", 1, "ass-events", text, 1280, 720)  # canvas size must be explicit on older mpv
+        screen.command("osd-overlay", 1, "ass-events", text)
     else:
         screen.command("osd-overlay", 1, "none", "")
 
