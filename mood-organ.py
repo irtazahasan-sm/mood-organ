@@ -36,6 +36,7 @@ LOOP_SESSION = True       # repeat the dialed mood until another code is dialed
 SCALE_MODE = ["fill", "fit"][1]
 # "black": opaque black behind everything; "transparent": see the desktop through transparent pixels (needs a compositor)
 BACKGROUND = ["black", "transparent"][0]
+SHOW_MENU = True          # list the dialable codes on the splash screen
 VIDEO = {".mp4", ".mov", ".mkv", ".webm"}
 IMAGE = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 SOUND = {".mp3", ".wav", ".ogg", ".m4a", ".flac"}
@@ -100,10 +101,10 @@ def say(text, seconds):
 
 def show_menu(visible):
     """List the dialable codes along the bottom of the splash screen."""
-    codes = [p.name for p in sorted(MOODS_DIR.iterdir()) if p.is_dir()] if visible else []
+    codes = [p.name for p in sorted(MOODS_DIR.iterdir()) if p.is_dir()] if visible and SHOW_MENU else []
     if codes:
         text = "{\\an2\\fs40}Dial:  " + "   ".join(codes)
-        screen.command("osd-overlay", 1, "ass-events", text)
+        screen.command("osd-overlay", 1, "ass-events", text, 1280, 720)  # canvas size must be explicit on older mpv
     else:
         screen.command("osd-overlay", 1, "none", "")
 
