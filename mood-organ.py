@@ -27,7 +27,7 @@ import mpv
 # ---- Settings ---------------------------------------------------------------
 HERE = Path(__file__).resolve().parent
 MOODS_DIR = HERE / "moods"
-SPLASH = HERE / "splash-screen-heart.png" # "splash-screen-heart.png" was producing bluescreened splash screen
+SPLASH = HERE / "splash-screen.png" # "splash-screen.png" was producing bluescreened splash screen
 DIAL_AFTER = 2.0          # seconds after the last digit before the code goes through
 NO_SETTING_SECONDS = 5    # how long "No setting for ..." stays on screen
 IMAGE_SECONDS = 2.0       # how long each still image stays up
